@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Direct Signature Link</title>
+    <!-- Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.0.0/dist/signature_pad.umd.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .card { background: white; padding: 25px; border-radius: 15px; box-shadow: 0 8px 30px rgba(0,0,0,0.1); width: 90%; max-width: 450px; text-align: center; }
+        #canvas-container { border: 2px dashed #cbd5e0; border-radius: 10px; margin: 15px 0; background: #fff; touch-action: none; }
+        canvas { width: 100%; height: 250px; cursor: crosshair; }
+        .btns { display: flex; gap: 10px; margin-bottom: 10px; }
+        button { flex: 1; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-black { background: #000; color: white; }
+        .btn-blue { background: #0000FF; color: white; }
+        .btn-clear { background: #edf2f7; color: #4a5568; }
+        .btn-send { background: #3182ce; color: white; width: 100%; font-size: 1.1rem; }
+        .btn-download { background: #38a169; color: white; width: 100%; margin-top: 10px; }
+        .status { font-size: 0.85rem; margin-top: 15px; color: #718096; padding: 10px; border-radius: 5px; background: #f7fafc; }
+        #copy-box { word-break: break-all; font-family: monospace; font-size: 11px; background: #eee; padding: 10px; margin-top: 10px; cursor: pointer; }
+        .hidden { display: none; }
+        #received-image { max-width: 100%; border: 1px solid #ddd; margin-top: 10px; background-image: linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%); background-size: 10px 10px; background-position: 0 0, 0 5px, 5px 5px, 5px 0; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <!-- VIEW 1: STUDENT VIEW (Waiting for Signature) -->
+    <div id="student-view">
+        <h2>Student Dashboard</h2>
+        <p>Send this link to your mom abroad:</p>
+        <div id="copy-box" onclick="copyLink()">Generating link...</div>
+        <div class="status" id="student-status">Waiting for mom to connect...</div>
+        
+        <div id="result-area" class="hidden">
+            <h3 style="color: green;">✓ Signature Received!</h3>
+            <img id="received-image" />
+            <button class="btn-download" onclick="downloadImage()">Download Transparent PNG</button>
+        </div>
+    </div>
+
+    <!-- VIEW 2: MOM VIEW (The Signature Pad) -->
+    <div id="mom-view" class="hidden">
+        <h2>Sign for School</h2>
+        <p>Please sign below in Black or Blue ink.</p>
+        <div class="btns">
+            <button class="btn-black" onclick="setColor('black')">Black Ink</button>
+            <button class="btn-blue" onclick="setColor('blue')">Blue Ink</button>
+        </div>
+        <div id="canvas-container">
+            <canvas id="pad"></canvas>
+        </div>
+        <button class="btn-clear" onclick="signaturePad.clear()">Clear</button>
+        <br><br>
+        <button class="btn-send" onclick="sendToStudent()">Send Signature Now</button>
+        <div class="status" id="mom-status">Connected to child's computer.</div>
+    </div>
+</div>
+
+<script>
+    const studentView = document.getElementById('student-view');
+    const momView = document.getElementById('mom-view');
+    const studentStatus = document.getElementById('student-status');
+    const momStatus = document.getElementById('mom-status');
+    const canvas = document.getElementById('pad');
+    
+    // Initialize Signature Pad
+    const signaturePad = new SignaturePad(canvas, { backgroundColor: 'rgba(0,0,0,0)' });
+
+    function setColor(color) { signaturePad.penColor = color; }
+
+    // --- PeerJS Logic ---
+    const peer = new Peer(); 
+    let conn;
+
+    // Determine if we are the Student or the Mom
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetId = urlParams.get('id');
+
+    peer.on('open', (id) => {
+        if (targetId) {
+            // I AM THE MOM
+            studentView.classList.add('hidden');
+            momView.classList.remove('hidden');
+            conn = peer.connect(targetId);
+            setupMomLogic();
+        } else {
+            // I AM THE STUDENT
+            const link = window.location.href.split('?')[0] + '?id=' + id;
+            document.getElementById('copy-box').innerText = link;
+            setupStudentLogic();
+        }
+    });
+
+    // STUDENT SIDE LOGIC
+    function setupStudentLogic() {
+        peer.on('connection', (c) => {
+            conn = c;
+            studentStatus.innerText = "Mom is now signing...";
+            studentStatus.style.color = "blue";
+
+            conn.on('data', (data) => {
+                if (data.image) {
+                    document.getElementById('result-area').classList.remove('hidden');
+                    document.getElementById('received-image').src = data.image;
+                    studentStatus.innerText = "Signature received successfully!";
+                }
+            });
+        });
+    }
+
+    // MOM SIDE LOGIC
+    function setupMomLogic() {
+        conn.on('open', () => {
+            momStatus.innerText = "Connected! You can now sign.";
+        });
+    }
+
+    function sendToStudent() {
+        if (signaturePad.isEmpty()) {
+            alert("Please sign first.");
+            return;
+        }
+        const dataURL = signaturePad.toDataURL("image/png"); // Transparent PNG
+        conn.send({ image: dataURL });
+        momStatus.innerText = "Sent! You can close this window.";
+        momStatus.style.color = "green";
+    }
+
+    // Utility Functions
+    function copyLink() {
+        const text = document.getElementById('copy-box').innerText;
+        navigator.clipboard.writeText(text);
+        alert("Link copied! Send this to your mom.");
+    }
+
+    function downloadImage() {
+        const link = document.createElement('a');
+        link.download = 'mom-signature.png';
+        link.href = document.getElementById('received-image').src;
+        link.click();
+    }
+
+    // Resize Canvas for Mobile
+    function resizeCanvas() {
+        const ratio = Math.max(window.devicePixelRatio || 1, 1);
+        canvas.width = canvas.offsetWidth * ratio;
+        canvas.height = canvas.offsetHeight * ratio;
+        canvas.getContext("2d").scale(ratio, ratio);
+        signaturePad.clear();
+    }
+    window.onresize = resizeCanvas;
+    resizeCanvas();
+</script>
+
+</body>
+</html>
