@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>School Digital Signature</title>
+    <!-- Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { font-family: -apple-system, sans-serif; background: #f4f4f9; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; overflow: hidden; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); width: 95%; max-width: 400px; text-align: center; box-sizing: border-box; }
+        
+        /* The Canvas Area */
+        #signature-container { 
+            border: 2px solid #ddd; 
+            border-radius: 8px; 
+            margin: 15px 0; 
+            background: #fafafa; /* Light grey so mom can see where to sign */
+            position: relative;
+            height: 250px;
+        }
+        canvas { 
+            width: 100%; 
+            height: 100%; 
+            touch-action: none; /* Critical for mobile drawing */
+        }
+
+        .controls { display: flex; gap: 10px; margin-bottom: 10px; }
+        button { flex: 1; padding: 12px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+        
+        .btn-black { background: #000; color: white; }
+        .btn-blue { background: #0000FF; color: white; }
+        .btn-clear { background: #fee2e2; color: #dc2626; }
+        .btn-send { background: #2563eb; color: white; width: 100%; font-size: 1.1rem; margin-top: 10px; }
+        .btn-download { background: #059669; color: white; width: 100%; margin-top: 15px; }
+
+        .status-box { font-size: 13px; margin-top: 15px; padding: 10px; border-radius: 5px; background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; }
+        #link-display { word-break: break-all; font-family: monospace; padding: 10px; background: #333; color: #fff; margin-top: 10px; border-radius: 4px; font-size: 11px; cursor: pointer; }
+        .hidden { display: none; }
+        #received-preview { max-width: 100%; height: auto; border: 1px dashed #ccc; margin-top: 10px; background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAAXNSR0IArs4c6QAAACBJREFUGFdjZEADJkYGBgYmZgY0ASZGBkYGJgYmBgYmBgAlAwIDpYV9SAAAAABJRU5ErkJggg=='); }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <!-- STUDENT VIEW -->
+    <div id="student-view">
+        <h2 style="margin-top:0">Student View</h2>
+        <p style="font-size:14px">1. Copy this link and send it to your mom:</p>
+        <div id="link-display" onclick="copyLink()">Generating link...</div>
+        <div class="status-box" id="student-status">Waiting for connection...</div>
+        
+        <div id="result-area" class="hidden">
+            <p style="color:green; font-weight:bold;">✓ Signature Received!</p>
+            <img id="received-preview" />
+            <button class="btn-download" onclick="downloadImage()">Download Transparent PNG</button>
+        </div>
+    </div>
+
+    <!-- MOM VIEW -->
+    <div id="mom-view" class="hidden">
+        <h2 style="margin-top:0">Sign for School</h2>
+        <div class="controls">
+            <button class="btn-black" onclick="setInk('black')">Black Ink</button>
+            <button class="btn-blue" onclick="setInk('blue')">Blue Ink</button>
+        </div>
+        
+        <div id="signature-container">
+            <canvas id="canvas"></canvas>
+        </div>
+        
+        <button class="btn-clear" onclick="clearCanvas()">Clear and Restart</button>
+        <button class="btn-send" onclick="sendToStudent()">Send to My Child</button>
+        <div class="status-box" id="mom-status">Connected</div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const studentView = document.getElementById('student-view');
+    const momView = document.getElementById('mom-view');
+    const studentStatus = document.getElementById('student-status');
+    const momStatus = document.getElementById('mom-status');
+    
+    let signaturePad;
+    let peer = new Peer();
+    let conn;
+
+    // Initialize Canvas properly
+    function initPad() {
+        const ratio = Math.max(window.devicePixelRatio || 1, 1);
+        canvas.width = canvas.offsetWidth * ratio;
+        canvas.height = canvas.offsetHeight * ratio;
+        canvas.getContext("2d").scale(ratio, ratio);
+        
+        signaturePad = new SignaturePad(canvas, {
+            backgroundColor: 'rgba(255, 255, 255, 0)', // Transparent
+            penColor: 'black'
+        });
+    }
+
+    // Handle Logic
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetId = urlParams.get('id');
+
+    peer.on('open', (id) => {
+        if (targetId) {
+            // MOM SIDE
+            studentView.classList.add('hidden');
+            momView.classList.remove('hidden');
+            initPad();
+            conn = peer.connect(targetId);
+            conn.on('open', () => { momStatus.innerText = "Connected! You can sign now."; });
+        } else {
+            // STUDENT SIDE
+            const myLink = window.location.origin + window.location.pathname + '?id=' + id;
+            document.getElementById('link-display').innerText = myLink;
+            setupStudentReceiver();
+        }
+    });
+
+    function setupStudentReceiver() {
+        peer.on('connection', (c) => {
+            conn = c;
+            studentStatus.innerText = "Mom is connected and signing...";
+            conn.on('data', (data) => {
+                if (data.image) {
+                    document.getElementById('result-area').classList.remove('hidden');
+                    document.getElementById('received-preview').src = data.image;
+                    studentStatus.innerText = "Success! Download below.";
+                }
+            });
+        });
+    }
+
+    function setInk(color) { signaturePad.penColor = color; }
+    function clearCanvas() { signaturePad.clear(); }
+
+    function sendToStudent() {
+        if (signaturePad.isEmpty()) return alert("Please sign first!");
+        const dataURL = signaturePad.toDataURL("image/png");
+        conn.send({ image: dataURL });
+        momStatus.innerText = "Signature Sent Successfully!";
+        momStatus.style.color = "green";
+    }
+
+    function downloadImage() {
+        const imgData = document.getElementById('received-preview').src;
+        const link = document.createElement('a');
+        link.href = imgData;
+        link.download = 'school-signature.png';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function copyLink() {
+        const link = document.getElementById('link-display').innerText;
+        navigator.clipboard.writeText(link).then(() => alert("Link Copied! Send it to your mom."));
+    }
+
+    // Initialize on start if Mom
+    window.addEventListener('load', () => { if(targetId) initPad(); });
+</script>
+
+</body>
+</html>
